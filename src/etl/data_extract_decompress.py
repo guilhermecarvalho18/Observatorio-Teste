@@ -9,6 +9,9 @@ def decompress_zip_files(source_dir, dest_dir):
         source_dir (str): Diretório onde estão os arquivos ZIP.
         dest_dir (str): Diretório de destino para os arquivos descompactados.
     """
+
+    #Rec
+
     os.makedirs(dest_dir, exist_ok=True)
     for file in os.listdir(source_dir):
         if file.lower().endswith(".zip"):
