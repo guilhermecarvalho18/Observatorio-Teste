@@ -2,7 +2,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, to_date, year, month, when, lit, to_timestamp, date_format, unix_timestamp, round
 
 
-def transformar_atracacao_fato(input_dir, output_dir):
+def transformar_atracacao_fato(input_dir = "datalake/raw/unzipped", output_dir = "datalake/processed/atracacao"):
     """
     Lê arquivos CSV de atracação, filtra e transforma 
     para o formato atracacao_fato.
@@ -15,61 +15,65 @@ def transformar_atracacao_fato(input_dir, output_dir):
     
     # Lê todos os CSVs de atracação (ex.: atracacao_2021.csv, atracacao_2022.csv, etc.)
     # Ajuste o padrão de arquivo conforme sua convenção de nome.
-    df = spark.read.option("sep", ";").csv(f"{input_dir}/*Atracacao.txt", header=True, inferSchema=True)
-    
+    df_atracacao = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]Atracacao.txt", header=True, inferSchema=True)
+    df_tempos_atracacao = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]TemposAtracacao.txt", header=True, inferSchema=True)
+
     # Filtra somente os anos 2021 a 2023. Supondo que exista uma coluna "Ano" ou similar.
-    df = df.filter((col("Ano") >= 2021) & (col("Ano") <= 2023))
+    df_atracacao = df_atracacao.filter((col("Ano") >= 2021) & (col("Ano") <= 2023))
     
     # Conversão de datas 
-    df = df.withColumn("data_atracacao", date_format(to_timestamp("Data Atracação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
-    df = df.withColumn("data_chegada", date_format(to_timestamp("Data Chegada", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
-    df = df.withColumn("data_desatracacao", date_format(to_timestamp("Data Desatracação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
-    df = df.withColumn("data_inicio_operacao", date_format(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
-    df = df.withColumn("data_termino_operacao", date_format(to_timestamp("Data Término Operação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
+    df_atracacao = df_atracacao.withColumn("data_atracacao", date_format(to_timestamp("Data Atracação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
+    df_atracacao = df_atracacao.withColumn("data_chegada", date_format(to_timestamp("Data Chegada", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
+    df_atracacao = df_atracacao.withColumn("data_desatracacao", date_format(to_timestamp("Data Desatracação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
+    df_atracacao = df_atracacao.withColumn("data_inicio_operacao", date_format(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
+    df_atracacao = df_atracacao.withColumn("data_termino_operacao", date_format(to_timestamp("Data Término Operação", "dd/MM/yyyy HH:mm:ss"), "dd-MM-yyyy HH:mm:ss"))
     
     # Cria colunas de Ano e Mês da data de início da operação
-    df = df.withColumn("ano_data_inicio_operacao", year(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
-    df = df.withColumn("mes_data_inicio_operacao", month(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
+    df_atracacao = df_atracacao.withColumn("ano_data_inicio_operacao", year(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
+    df_atracacao = df_atracacao.withColumn("mes_data_inicio_operacao", month(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
     
+    df_atracacao = df_atracacao.alias("a")
+    df_tempos_atracacao = df_tempos_atracacao.alias("ta")
+
+    df_join = df.join(
+        df_tempos_atracacao,
+        on=[col("a.IDAtracacao") == col("ta.IDAtracacao")],
+        how="left"
+        )
+    df_join = df_join.select("a.*","ta.TEsperaAtracacao", "ta.TEsperaInicioOp", 
+                                "ta.TOperacao", "ta.TEsperaDesatracacao", 
+                                "ta.TAtracado", "ta.TEstadia")
+
     # Renomeia colunas
-    df = df.withColumnRenamed("IDAtracacao", "id_atracacao") \
-                            .withColumnRenamed("CDTUP", "cdtup") \
-                            .withColumnRenamed("IDBerco", "id_berco") \
-                            .withColumnRenamed("Berço", "berco") \
-                            .withColumnRenamed("Porto Atracação", "porto_atracacao") \
-                            .withColumnRenamed("Apelido Instalação Portuária", "apelido_instalacao_portuaria") \
-                            .withColumnRenamed("Complexo Portuário", "complexo_portuario") \
-                            .withColumnRenamed("Tipo da Autoridade Portuária", "tipo_autoridade_portuaria") \
-                            .withColumnRenamed("Tipo de Operação", "tipo_operacao") \
-                            .withColumnRenamed("Tipo de Navegação da Atracação", "tipo_navegacao_atracao") \
-                            .withColumnRenamed("Nacionalidade do Armador", "nacionalidade_armador") \
-                            .withColumnRenamed("FlagMCOperacaoAtracacao", "flag_mc_operacao_atracacao") \
-                            .withColumnRenamed("Terminal", "terminal") \
-                            .withColumnRenamed("Município", "municipio") \
-                            .withColumnRenamed("UF", "uf") \
-                            .withColumnRenamed("SGUF", "sguf") \
-                            .withColumnRenamed("Região Geográfica", "regiao_geografica") \
-                            .withColumnRenamed("Nº da Capitania", "numero_capitania") \
-                            .withColumnRenamed("Nº do IMO", "numero_imo") 
+    df_atracacao = df_join.withColumnRenamed("IDAtracacao", "id_atracacao") \
+                          .withColumnRenamed("CDTUP", "cdtup") \
+                          .withColumnRenamed("IDBerco", "id_berco") \
+                          .withColumnRenamed("Berço", "berco") \
+                          .withColumnRenamed("Porto Atracação", "porto_atracacao") \
+                          .withColumnRenamed("Apelido Instalação Portuária", "apelido_instalacao_portuaria") \
+                          .withColumnRenamed("Complexo Portuário", "complexo_portuario") \
+                          .withColumnRenamed("Tipo da Autoridade Portuária", "tipo_autoridade_portuaria") \
+                          .withColumnRenamed("Tipo de Operação", "tipo_operacao") \
+                          .withColumnRenamed("Tipo de Navegação da Atracação", "tipo_navegacao_atracao") \
+                          .withColumnRenamed("Nacionalidade do Armador", "nacionalidade_armador") \
+                          .withColumnRenamed("FlagMCOperacaoAtracacao", "flag_mc_operacao_atracacao") \
+                          .withColumnRenamed("Terminal", "terminal") \
+                          .withColumnRenamed("Município", "municipio") \
+                          .withColumnRenamed("UF", "uf") \
+                          .withColumnRenamed("SGUF", "sguf") \
+                          .withColumnRenamed("Região Geográfica", "regiao_geografica") \
+                          .withColumnRenamed("Nº da Capitania", "numero_capitania") \
+                          .withColumnRenamed("Nº do IMO", "numero_imo") \
+                          .withColumnRenamed("TEsperaAtracacao", "tempo_espera_atracacao") \
+                          .withColumnRenamed("TEsperaInicioOp", "tempo_espera_inicio_operacao") \
+                          .withColumnRenamed("TOperacao", "tempo_operacao") \
+                          .withColumnRenamed("TEsperaDesatracacao", "tempo_espera_desatracacao") \
+                          .withColumnRenamed("TAtracado", "tempo_atracado") \
+                          .withColumnRenamed("TEstadia", "tempo_estadia") 
 
 
-    df = df.withColumn("tempo_espera_atracacao", 
-                            round((unix_timestamp(col("data_atracacao"), "dd-MM-yyyy HH:mm:ss") - unix_timestamp(col("data_chegada"), "dd-MM-yyyy HH:mm:ss")) / 3600.0, 2)) \
-                            .withColumn("tempo_espera_inicio_operacao", 
-                            round((unix_timestamp(col("data_inicio_operacao"), "dd-MM-yyyy HH:mm:ss") - unix_timestamp(col("data_atracacao"), "dd-MM-yyyy HH:mm:ss")) / 3600.0, 2)) \
-                            .withColumn("tempo_operacao", 
-                            round((unix_timestamp(col("data_termino_operacao"), "dd-MM-yyyy HH:mm:ss") - unix_timestamp(col("data_inicio_operacao"), "dd-MM-yyyy HH:mm:ss")) / 3600.0, 2)) \
-                            .withColumn("tempo_espera_desatracacao", 
-                            round((unix_timestamp(col("data_desatracacao"), "dd-MM-yyyy HH:mm:ss") - unix_timestamp(col("data_termino_operacao"), "dd-MM-yyyy HH:mm:ss")) / 3600.0, 2)) 
-    
-    df = df.withColumn("tempo_atracado",
-                         round(col("tempo_espera_inicio_operacao") + col("tempo_operacao") + col("tempo_espera_desatracacao"), 2))   
-    
-    df = df.withColumn("tempo_estadia",
-                         round(col("tempo_espera_atracacao") + col("tempo_espera_inicio_operacao") + col("tempo_operacao") + col("tempo_espera_desatracacao"), 2))   
-    
     # Seleciona somente as colunas relevantes para a tabela atracacao_fato
-    df = df.select(
+    df_atracacao = df_atracacao.select(
             col("id_atracacao"),
             col("cdtup"),
             col("id_berco"),
@@ -105,14 +109,14 @@ def transformar_atracacao_fato(input_dir, output_dir):
     )
     
     # Salva em formato Parquet
-    df.write.mode("overwrite").parquet(output_dir)
+    df_atracacao.write.mode("overwrite").parquet(output_dir)
     
     spark.stop()
     print(f"Atracacao_fato processado e salvo em {output_dir}")
 
 
 
-def transformar_carga_fato(input_dir, input_sec_dir, output_dir):
+def transformar_carga_fato(input_dir = "datalake/raw/unzipped", input_atrac_dir = "datalake/processed/atracacao", output_dir = "datalake/processed/carga"):
     """
     Lê arquivos CSV de carga, filtra e transforma 
     para o formato carga_fato.
