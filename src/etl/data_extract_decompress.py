@@ -1,7 +1,7 @@
 import os
 import zipfile
 
-def decompress_zip_files(source_dir, dest_dir):
+def decompress_zip_files(source_dir = "datalake/raw/zipped", dest_dir = "datalake/raw/unzipped"):
     """
     Descompacta todos os arquivos ZIP do diretório source_dir para dest_dir.
 
@@ -26,8 +26,8 @@ def decompress_zip_files(source_dir, dest_dir):
 
 if __name__ == "__main__":
     # Cria diretórios temporários para fonte e destino dos arquivos ZIP
-    source_dir = "datalake/raw"
-    dest_dir = source_dir + "/unzipped"
+    source_dir = "datalake/raw/zipped"
+    dest_dir = "datalake/raw/unzipped"
     print("Diretório de origem:", source_dir)
     print("Diretório de destino:", dest_dir)
 
