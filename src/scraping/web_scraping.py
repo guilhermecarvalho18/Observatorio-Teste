@@ -6,6 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 import argparse
 import ast
+from selenium.webdriver.chrome.options import Options
 
 def parse_anos(value):
     """
@@ -60,8 +61,10 @@ def baixar_arquivos_por_ano(anos):
          - Salva os arquivos na pasta "datalake/raw" com um nome que inclua o ano.
       3. Encerra o navegador ao final.
     """
-
-    driver = webdriver.Chrome()
+    
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    driver = webdriver.Chrome(options=chrome_options)
     try:
         driver.get("https://web3.antaq.gov.br/ea/sense/download.html#pt")
 
@@ -86,14 +89,14 @@ def baixar_arquivos_por_ano(anos):
 
             # Agora localizar a tabela com os links de download
 
-            links = driver.find_elements(By.XPATH, "//table//a[contains(text(), 'Clique aqui')]")
+            links = driver.find_elements(By.XPATH, "//table//tr[td[contains(text(), 'Todos os Arquivos')]]//a[contains(text(), 'Clique aqui')]")
             
             # Extrair o atributo href de cada link
             for link_element in links:
                 url_download = link_element.get_attribute("href")
                 # Nome do arquivo baseando-se na URL ou no texto
                 nome_arquivo = url_download.split("/")[-1]
-                destino = os.path.join("datalake/raw", f"{nome_arquivo}")
+                destino = os.path.join("datalake/raw/zipped", f"{nome_arquivo}")
 
                 # Fazer o download via requests (mais simples para salvar em disco)
                 print(f"Baixando {url_download} para {destino}")
