@@ -1,6 +1,7 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, to_date, year, month, when, lit, to_timestamp, date_format, unix_timestamp, round
-
+from pyspark.sql.functions import col, to_date, year, month, when, lit, to_timestamp, date_format, unix_timestamp, round, monotonically_increasing_id
+from pyspark import StorageLevel
+import math
 
 def transformar_atracacao_fato(input_dir = "datalake/raw/unzipped", output_dir = "datalake/processed/atracacao"):
     """
@@ -17,6 +18,9 @@ def transformar_atracacao_fato(input_dir = "datalake/raw/unzipped", output_dir =
     # Ajuste o padrão de arquivo conforme sua convenção de nome.
     df_atracacao = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]Atracacao.txt", header=True, inferSchema=True)
     df_tempos_atracacao = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]TemposAtracacao.txt", header=True, inferSchema=True)
+
+    # Persistir o DataFrame para MEMORY_AND_DISK
+    df_atracacao = df_atracacao.persist(StorageLevel.MEMORY_AND_DISK)
 
     # Filtra somente os anos 2021 a 2023. Supondo que exista uma coluna "Ano" ou similar.
     df_atracacao = df_atracacao.filter((col("Ano") >= 2021) & (col("Ano") <= 2023))
@@ -110,7 +114,8 @@ def transformar_atracacao_fato(input_dir = "datalake/raw/unzipped", output_dir =
     
     # Salva em formato Parquet
     df_atracacao.write.mode("overwrite").parquet(output_dir)
-    
+    df_atracacao.unpersist()
+
     spark.stop()
     print(f"Atracacao_fato processado e salvo em {output_dir}")
 
@@ -125,48 +130,49 @@ def transformar_carga_fato(input_dir = "datalake/raw/unzipped", input_atrac_dir 
         input_dir (str): Caminho da pasta onde estão os CSVs descompactados.
         output_dir (str): Caminho onde serão salvos os dados processados (ex.: datalake/processed/carga_fato).
     """
-    spark = SparkSession.builder.appName("TransformCarga").config("spark.driver.memory", "8g").config("spark.executor.memory", "8g").getOrCreate()
+    spark = SparkSession.builder.appName("TransformCarga").config("spark.driver.memory", "16g").config("spark.executor.memory", "16g").getOrCreate()
 
     # Lê todos os CSVs de carga (ex.: carga_2021.csv, carga_2022.csv, etc.)
     df_carga = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]Carga.txt", header=True, inferSchema=True)
     df_atracacao = spark.read.parquet(f"{input_atrac_dir}")
     df_carga_container = spark.read.option("sep", ";").csv(f"{input_dir}/[0-9][0-9][0-9][0-9]Carga_Conteinerizada.txt", header=True, inferSchema=True)
 
+    # Persistir o DataFrame para MEMORY_AND_DISK
+    df_carga = df_carga.persist(StorageLevel.MEMORY_AND_DISK)
+
     # Filtra somente os anos 2021 a 2023 (ajuste conforme o seu layout)
-    df_carga_alias = df_carga.withColumn("id_atracacao", col("IDAtracacao").cast("int"))
-    df_carga_alias = df_carga_alias.withColumnRenamed("IDCarga", "id_carga")
-    df_carga_alias = df_carga_alias.alias("c")
+    df_carga = df_carga.withColumn("id_atracacao", col("IDAtracacao").cast("int")) \
+                       .withColumnRenamed("IDCarga", "id_carga")
+    df_carga_alias = df_carga.alias("c")
     df_atracacao_alias = df_atracacao.alias("a")
     
     df_join = df_carga_alias.join(
         df_atracacao_alias,
         on=[col("c.id_atracacao") == col("a.id_atracacao")],
         how= "left"
-        )
-    
-    df_carga = df_join.select("c.*", "a.ano_data_inicio_operacao", "a.mes_data_inicio_operacao", 
+        ).select("c.*", "a.ano_data_inicio_operacao", "a.mes_data_inicio_operacao", 
                                 "a.porto_atracacao", "a.sguf")
+    
+    df_carga = df_join
 
-    df_join_2 = df_carga.join(
+    df_atracacao_alias.unpersist()
+    
+    df_join_2 = df_join.join(
         df_carga_container.alias("cc"),
         on=[col("c.id_carga") == col("cc.IDCarga")],
         how= "left"
     )
 
-    df_join_2 = df_join_2.withColumn(
-    "peso_liquido_carga",
-    when(
-        (col("ConteinerEstado").isNotNull()) & (col("ConteinerEstado") != "Vazio"),
-        col("VLPesoCargaConteinerizada")
-    ).otherwise(col("VLPesoCargaBruta"))
-    )
+    df_carga_container.unpersist()
 
     df_join_2 = df_join_2.withColumn(
-    "cd_mercadoria",
-    when(
-        (col("ConteinerEstado").isNotNull()) & (col("ConteinerEstado") != "Vazio"),
-        col("CDMercadoriaConteinerizada")
-    ).otherwise(col("CDMercadoria"))
+        "peso_liquido_carga",
+        when((col("ConteinerEstado").isNotNull()) & (col("ConteinerEstado") != "Vazio"),
+             col("VLPesoCargaConteinerizada")).otherwise(col("VLPesoCargaBruta"))
+    ).withColumn(
+        "cd_mercadoria",
+        when((col("ConteinerEstado").isNotNull()) & (col("ConteinerEstado") != "Vazio"),
+             col("CDMercadoriaConteinerizada")).otherwise(col("CDMercadoria"))
     )
     # Exemplo de renomear colunas e criar colunas extras
 
@@ -233,18 +239,26 @@ def transformar_carga_fato(input_dir = "datalake/raw/unzipped", input_atrac_dir 
     )
 
     df_carga = df_carga.withColumnRenamed("IDAtracacao", "id_atracacao") 
-    
+ 
     # Salva em formato Parquet
-    df_carga.write.option("parquet.block.size", 134217728).mode("overwrite").parquet(output_dir)
-    
+    # Aqui usamos coalesce para salvar em múltiplos arquivos menores (por exemplo, 200 partições)
+    df_carga = df_carga.coalesce(200)
+    df_carga.write \
+    .option("parquet.block.size", 67108864) \
+    .partitionBy("ano_data_inicio_operacao", "mes_data_inicio_operacao") \
+    .mode("overwrite") \
+    .parquet(output_dir)
+
+    df_carga.unpersist()
+
     spark.stop()
     print(f"Carga_fato processado e salvo em {output_dir}")
 
 if __name__ == "__main__":
 
-    input_atrac = "datalake/raw/unzipped"
-    output_atrac = "datalake/processed/atracacao"
-    transformar_atracacao_fato(input_atrac, output_atrac)
+    #input_atrac = "datalake/raw/unzipped"
+    #output_atrac = "datalake/processed/atracacao"
+    #transformar_atracacao_fato(input_atrac, output_atrac)
 
     input_carga = "datalake/raw/unzipped"
     output_carga = "datalake/processed/carga"

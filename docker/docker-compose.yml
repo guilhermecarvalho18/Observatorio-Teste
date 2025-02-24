@@ -1,25 +1,48 @@
 version: '3.8'
 services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=AntaqFiec@2025
+    ports:
+      - "1433:1433"
+    volumes:
+      - sql_data:/var/opt/mssql
+
   airflow:
     image: apache/airflow:2.5.1
+    container_name: airflow
+    user: "50000:50000"  
+    depends_on:
+      - sqlserver
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__EXECUTOR=SequentialExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
     volumes:
       - ./src/airflow_dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
+      - ./datalake:/opt/airflow/datalake
     ports:
       - "8080:8080"
     command: webserver
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2019-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=YourStrong@Passw0rd
-    ports:
-      - "1433:1433"
+
+  spark-etl:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: spark-etl
+    depends_on:
+      - sqlserver
     volumes:
-      - sql_data:/var/opt/mssql
+      - ./datalake:/app/datalake  # Permite que o container acesse os dados
+    environment:
+      - JDBC_URL=jdbc:sqlserver://sqlserver:1433;databaseName=antaq_db;encrypt=true;trustServerCertificate=true
+      - DB_USER=sa
+      - DB_PASSWORD=AntaqFiec@2025
+    # O comando será passado via DockerOperator na DAG
+
 volumes:
   sql_data:
