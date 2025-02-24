@@ -29,7 +29,7 @@ def transformar_atracacao_fato(input_dir, output_dir):
     
     # Cria colunas de Ano e Mês da data de início da operação
     df = df.withColumn("ano_data_inicio_operacao", year(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
-    df = df.withColumn("mes_data_termino_operacao", month(to_timestamp("Data Término Operação", "dd/MM/yyyy HH:mm:ss")))
+    df = df.withColumn("mes_data_inicio_operacao", month(to_timestamp("Data Início Operação", "dd/MM/yyyy HH:mm:ss")))
     
     # Renomeia colunas
     df = df.withColumnRenamed("IDAtracacao", "id_atracacao") \
@@ -84,7 +84,7 @@ def transformar_atracacao_fato(input_dir, output_dir):
             col("data_inicio_operacao"),
             col("data_termino_operacao"),
             col("ano_data_inicio_operacao"),
-            col("mes_data_termino_operacao"),
+            col("mes_data_inicio_operacao"),
             col("tipo_operacao"),
             col("tipo_navegacao_atracao"),
             col("nacionalidade_armador"),
@@ -112,7 +112,7 @@ def transformar_atracacao_fato(input_dir, output_dir):
 
 
 
-def transformar_carga_fato(input_dir, output_dir):
+def transformar_carga_fato(input_dir, input_sec_dir, output_dir):
     """
     Lê arquivos CSV de carga, filtra e transforma 
     para o formato carga_fato.
@@ -124,11 +124,21 @@ def transformar_carga_fato(input_dir, output_dir):
     spark = SparkSession.builder.appName("TransformCarga").getOrCreate()
     
     # Lê todos os CSVs de carga (ex.: carga_2021.csv, carga_2022.csv, etc.)
-    df = spark.read.csv(f"{input_dir}/carga_*.csv", header=True, inferSchema=True)
-    
+    df = spark.read.option("sep", ";").csv(f"{input_dir}/*Carga.txt", header=True, inferSchema=True)
+    df_atracacao = spark.read.parquet(f"{input_sec_dir}/atracacao")
+
     # Filtra somente os anos 2021 a 2023 (ajuste conforme o seu layout)
-    df = df.filter((col("Ano") >= 2021) & (col("Ano") <= 2023))
+    df_atracacao_alias = df_atracacao.alias("a").select("IDAtracacao")
+    df_carga_alias = df.alias("c")
     
+    df_join = df_carga_alias.join(
+        df_atracacao_alias,
+        on=[col("c.IDAtracacao") == col("a.IDAtracacao")],
+        how="inner"
+        )
+    
+    df_carga = df_join.select("c.*")
+
     # Exemplo de renomear colunas e criar colunas extras
     df = df.withColumnRenamed("IDCarga", "id_carga") \
            .withColumnRenamed("IDAtracacao", "id_atracacao") \
@@ -158,4 +168,14 @@ def transformar_carga_fato(input_dir, output_dir):
     df.write.mode("overwrite").parquet(output_dir)
     
     spark.stop()
-    print(f"carga_fato processado e salvo em {output_dir}")
+    print(f"Carga_fato processado e salvo em {output_dir}")
+
+if __name__ == "__main__":
+    input_atrac = "datalake/raw/unzipped"
+    output_atrac = "datalake/processed/atracacao"
+    transformar_atracacao_fato(input_atrac, output_atrac)
+
+    input_carga = "datalake/raw/unzipped"
+    output_carga = "datalake/processed/carga"
+    input_atrac_dir = "datalake/processed/atracacao" 
+    transformar_carga_fato(input_atrac, input_atrac_dir, output_atrac)
