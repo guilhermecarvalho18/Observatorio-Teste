@@ -66,8 +66,10 @@ def baixar_arquivos_por_ano(anos):
         driver.get("https://web3.antaq.gov.br/ea/sense/download.html#pt")
 
         # Criar pasta local para armazenar os downloads
-        os.makedirs("datalake/raw", exist_ok=True)
-        os.makedirs("datalake/processed", exist_ok=True)
+        os.makedirs("datalake/raw/zipped", exist_ok=True)
+        os.makedirs("datalake/raw/unzipped", exist_ok=True)
+        os.makedirs("datalake/processed/atracacao", exist_ok=True)
+        os.makedirs("datalake/processed/carga", exist_ok=True)
         os.makedirs("datalake/logs", exist_ok=True)
 
         for ano in anos:
