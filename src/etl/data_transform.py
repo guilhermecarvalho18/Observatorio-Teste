@@ -242,9 +242,9 @@ def transformar_carga_fato(input_dir = "datalake/raw/unzipped", input_atrac_dir 
 
 if __name__ == "__main__":
 
-    #input_atrac = "datalake/raw/unzipped"
-    #output_atrac = "datalake/processed/atracacao"
-    #transformar_atracacao_fato(input_atrac, output_atrac)
+    input_atrac = "datalake/raw/unzipped"
+    output_atrac = "datalake/processed/atracacao"
+    transformar_atracacao_fato(input_atrac, output_atrac)
 
     input_carga = "datalake/raw/unzipped"
     output_carga = "datalake/processed/carga"
